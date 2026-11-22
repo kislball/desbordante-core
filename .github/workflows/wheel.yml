@@ -111,8 +111,11 @@ jobs:
           run: |
             LINUX_MATRIX='${{ needs.generate-linux-wheels-matrix.outputs.include }}'
             MACOS_MATRIX='${{ needs.generate-macos-wheels-matrix.outputs.include }}'
-            
-            MERGED_MATRIX=$(jq -c -n --argjson var1 "$LINUX_MATRIX" --argjson var2 "$MACOS_MATRIX" '$var1 + $var2')
+
+            MERGED_MATRIX=$(jq -c -n --argjson linux "$LINUX_MATRIX" --argjson macos "$MACOS_MATRIX" '
+              $linux + $macos | group_by([.os, .toolset]) |
+              map(.[0].save_cache = true) | flatten(1)
+            ')
             echo "include=$MERGED_MATRIX" >> $GITHUB_OUTPUT
         - name: Check merged matrix
           run: echo "${{ steps.merge.outputs.include }}"
@@ -127,17 +130,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+
       - name: Install dependencies
         uses: ./.github/composite-actions/install-dependencies
         with:
           os: ${{ matrix.os }}
           toolset: ${{ matrix.toolset }}
           boost-libraries: ''
-
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: wheels-${{ matrix.os }}-${{ matrix.toolset }}-${{ matrix.only }}
+          ccache-key: wheels-${{ matrix.os }}-${{ matrix.toolset }}
+          ccache-save: ${{ github.event_name == 'push' && matrix.save_cache }}
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.2.1
@@ -145,18 +146,15 @@ jobs:
           only: ${{ matrix.only }}
         env:
           MACOSX_DEPLOYMENT_TARGET: 11.0
-          CIBW_CONFIG_SETTINGS: cmake.define.DESBORDANTE_USE_CCACHE=ON
-          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: >
-            dnf install -y epel-release &&
-            dnf install -y ccache &&
             cd lib/boost &&
             ./bootstrap.sh --with-libraries=container,thread,graph &&
             ./b2 install -j4 --prefix=/usr
           CIBW_ENVIRONMENT_LINUX: >
             BOOST_ROOT=/usr
             CXX=g++
-            CCACHE_DIR=/host${{ github.workspace }}/.ccache
+            CMAKE_CXX_COMPILER_LAUNCHER=/host${{ env.CMAKE_CXX_COMPILER_LAUNCHER }}
+            CCACHE_DIR=/host${{ env.CCACHE_DIR }}
             CCACHE_MAXSIZE=500M
           CIBW_BEFORE_ALL_MACOS: >
             cd lib/boost &&
@@ -175,6 +173,10 @@ jobs:
             cp {project}/test_input_data/TestWide.csv {project}/src/python_bindings &&
             cd {project}/src/python_bindings &&
             python3 {project}/src/python_bindings/test_bindings.py
+
+      - name: Restore compiler cache ownership
+        if: ${{ !cancelled() && runner.os == 'Linux' && env.CCACHE_DIR != '' }}
+        run: sudo chown -R "$(id -u):$(id -g)" "$CCACHE_DIR"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
