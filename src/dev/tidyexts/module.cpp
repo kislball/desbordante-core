@@ -1,3 +1,4 @@
+#include "checks/bitset.h"
 #include "checks/explicitcapture.h"
 #include "checks/makeauto.h"
 #include "checks/prohibitat.h"
@@ -16,6 +17,7 @@ public:
         factories.registerCheck<ProhibitAtCheck>("desbordante.ProhibitAt");
         factories.registerCheck<BindCaseCheck>("desbordante.pybind.BindCase");
         factories.registerCheck<PythonReprCheck>("desbordante.pybind.Repr");
+        factories.registerCheck<BitsetCheck>("desbordante.Bitset");
     }
 };
 
